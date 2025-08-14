@@ -11,6 +11,11 @@ import os
 from unittest.mock import Mock, patch, AsyncMock
 from typing import List, Dict, Any
 
+# FastAPI testing imports
+from fastapi.testclient import TestClient
+from fastapi import FastAPI
+import httpx
+
 # Import the modules we're testing
 import sys
 sys.path.append('..')  # Add parent directory to path
@@ -289,3 +294,145 @@ def performance_test_data():
                 chunks.append(chunk)
     
     return {"courses": courses, "chunks": chunks}
+
+
+# API Testing Fixtures
+
+@pytest.fixture
+def test_app():
+    """Create a test FastAPI app without static file mounting"""
+    from fastapi import FastAPI, HTTPException
+    from fastapi.middleware.cors import CORSMiddleware
+    from pydantic import BaseModel
+    from typing import List, Optional
+    
+    # Create test app with same structure as main app but without static files
+    app = FastAPI(title="Course Materials RAG System - Test", root_path="")
+    
+    # Add CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    
+    # Define same Pydantic models
+    class QueryRequest(BaseModel):
+        query: str
+        session_id: Optional[str] = None
+
+    class QueryResponse(BaseModel):
+        answer: str
+        sources: List[str]
+        session_id: str
+
+    class CourseStats(BaseModel):
+        total_courses: int
+        course_titles: List[str]
+    
+    # Mock RAG system for testing
+    mock_rag = Mock()
+    mock_rag.query.return_value = ("Test answer", ["Test source"])
+    mock_rag.session_manager.create_session.return_value = "test-session-123"
+    mock_rag.get_course_analytics.return_value = {
+        "total_courses": 2,
+        "course_titles": ["Python Programming", "Data Science"]
+    }
+    
+    # Define API endpoints with mocked dependencies
+    @app.post("/api/query", response_model=QueryResponse)
+    async def query_documents(request: QueryRequest):
+        try:
+            session_id = request.session_id or mock_rag.session_manager.create_session()
+            answer, sources = mock_rag.query(request.query, session_id)
+            return QueryResponse(
+                answer=answer,
+                sources=sources,
+                session_id=session_id
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/api/courses", response_model=CourseStats)
+    async def get_course_stats():
+        try:
+            analytics = mock_rag.get_course_analytics()
+            return CourseStats(
+                total_courses=analytics["total_courses"],
+                course_titles=analytics["course_titles"]
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    # Store mock for test access
+    app.state.mock_rag = mock_rag
+    
+    return app
+
+
+@pytest.fixture
+def test_client(test_app):
+    """Create a test client for the FastAPI app"""
+    return TestClient(test_app)
+
+
+@pytest.fixture
+async def async_test_client(test_app):
+    """Create an async test client for the FastAPI app"""
+    async with httpx.AsyncClient(app=test_app, base_url="http://test") as client:
+        yield client
+
+
+@pytest.fixture
+def sample_query_request():
+    """Sample query request data for API testing"""
+    return {
+        "query": "What is Python programming?",
+        "session_id": "test-session-123"
+    }
+
+
+@pytest.fixture
+def sample_query_request_no_session():
+    """Sample query request without session ID"""
+    return {
+        "query": "Explain variables in Python"
+    }
+
+
+@pytest.fixture
+def invalid_query_request():
+    """Invalid query request for error testing"""
+    return {
+        "invalid_field": "This should fail validation"
+    }
+
+
+@pytest.fixture
+def expected_query_response():
+    """Expected query response structure"""
+    return {
+        "answer": "Test answer",
+        "sources": ["Test source"],
+        "session_id": "test-session-123"
+    }
+
+
+@pytest.fixture
+def expected_course_stats():
+    """Expected course statistics response"""
+    return {
+        "total_courses": 2,
+        "course_titles": ["Python Programming", "Data Science"]
+    }
+
+
+@pytest.fixture
+def mock_rag_system_error():
+    """Mock RAG system that raises errors for testing error handling"""
+    mock_rag = Mock()
+    mock_rag.query.side_effect = Exception("Database connection failed")
+    mock_rag.get_course_analytics.side_effect = Exception("Analytics service unavailable")
+    return mock_rag

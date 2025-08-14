@@ -14,4 +14,25 @@ dependencies = [
     "python-dotenv==1.1.1",
     "pytest>=8.4.1",
     "pytest-mock>=3.14.1",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.24.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--disable-warnings",
+    "--color=yes"
+]
+markers = [
+    "unit: marks tests as unit tests",
+    "integration: marks tests as integration tests", 
+    "api: marks tests as API tests",
+    "slow: marks tests as slow running"
+]
+asyncio_mode = "auto"
